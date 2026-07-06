@@ -75,6 +75,10 @@ class DimStyle:
     gap: int | None = None         # gap/inset between edge and dimension line
     margin_extra: int = 0          # extra outer space (margin mode only)
     show_witness: bool = True      # end ticks / extension lines
+    watermark: bool = False        # composite the NAWAQIS logo BEHIND the image
+    watermark_opacity: float = 0.12
+    watermark_scale: float = 0.72  # logo width as a fraction of the image width
+    watermark_bg: str = "#FFFFFF"  # fill shown where the product is transparent
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +147,54 @@ def to_bytes(canvas: Image.Image, fmt: str = "png", bg: str = "#FFFFFF",
         return buf.getvalue(), "image/webp"
     canvas.save(buf, "PNG")
     return buf.getvalue(), "image/png"
+
+
+# ---------------------------------------------------------------------------
+# Watermark — the NAWAQIS logo placed BEHIND the product image
+# ---------------------------------------------------------------------------
+_LOGO_PATH = os.environ.get(
+    "WATERMARK_LOGO",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "nawaqis-logo.png"),
+)
+_logo_cache = None
+
+
+def _load_logo():
+    global _logo_cache
+    if _logo_cache is None:
+        try:
+            logo = Image.open(_LOGO_PATH).convert("RGBA")
+            logo.load()
+            _logo_cache = logo
+        except Exception:
+            _logo_cache = False
+    return _logo_cache or None
+
+
+def _apply_watermark(product, style):
+    """Composite the product over a (background + faint centered logo) backdrop.
+
+    The logo shows through wherever the product image is transparent — the
+    classic catalog look for cut-out product photos.
+    """
+    iw, ih = product.size
+    canvas = Image.new("RGBA", (iw, ih), _rgba(style.watermark_bg))
+    logo = _load_logo()
+    if logo is not None:
+        scale = max(0.05, min(1.0, float(style.watermark_scale)))
+        tw = max(1, int(iw * scale))
+        th = max(1, round(logo.height * tw / logo.width))
+        max_h = int(ih * scale)
+        if max_h > 0 and th > max_h:                 # keep it inside on wide logos
+            th = max_h
+            tw = max(1, round(logo.width * th / logo.height))
+        piece = logo.resize((tw, th), Image.LANCZOS)
+        op = max(0.0, min(1.0, float(style.watermark_opacity)))
+        if op < 1.0:
+            piece.putalpha(piece.split()[-1].point(lambda v: int(v * op)))
+        canvas.alpha_composite(piece, ((iw - tw) // 2, (ih - th) // 2))
+    canvas.alpha_composite(product, (0, 0))
+    return canvas
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +369,9 @@ def annotate(image, width_value, height_value, style=None):
     input; in "margin" mode the canvas is expanded.
     """
     style = style or DimStyle()
+    img = image.convert("RGBA")
+    if style.watermark:
+        img = _apply_watermark(img, style)
     if (style.mode or "inset").lower() == "margin":
-        return _annotate_margin(image, width_value, height_value, style)
-    return _annotate_inset(image, width_value, height_value, style)
+        return _annotate_margin(img, width_value, height_value, style)
+    return _annotate_inset(img, width_value, height_value, style)

@@ -112,6 +112,10 @@ def _build_style(params: dict) -> tuple[float, float, DimStyle]:
             gap=as_int("gap"),
             margin_extra=int(get("margin_extra", 0)),
             show_witness=str(get("witness", "1")).lower() not in ("0", "false", "no"),
+            watermark=str(get("watermark", "")).lower() in ("1", "true", "yes", "on"),
+            watermark_opacity=float(get("watermark_opacity", 0.12)),
+            watermark_scale=float(get("watermark_scale", 0.72)),
+            watermark_bg=get("watermark_bg", "#FFFFFF"),
         )
     except (TypeError, ValueError):
         raise ApiError(400, "A numeric styling parameter was not a number")
@@ -167,6 +171,11 @@ def root():
             "halo": "inset contrast outline: auto | colour | none (default auto)",
             "color": "line/label colour, name or hex (default #151515)",
             "bg": "margin colour, margin mode only (default #FFFFFF)",
+            "watermark": "1 to place the NAWAQIS logo BEHIND the image "
+                         "(shows through the product's transparent areas)",
+            "watermark_opacity": "0-1 logo opacity (default 0.12)",
+            "watermark_scale": "logo width as a fraction of the image (default 0.72)",
+            "watermark_bg": "colour behind transparent areas (default #FFFFFF)",
             "format": "png | jpeg | webp (default png)",
             "response": "binary | base64 | dataurl (default binary)",
             "scale": "multiply all sizes (default 1.0)",
