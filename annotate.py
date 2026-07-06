@@ -193,40 +193,44 @@ def _annotate_inset(img, width_value, height_value, style):
     w_tw, w_th = wb[2] - wb[0], wb[3] - wb[1]
     h_tw, h_th = hb[2] - hb[0], hb[3] - hb[1]
 
-    # keep the lines comfortably inside the frame
-    pad = max(4, min(pad, iw // 4, ih // 4))
-    x0, x1 = pad, iw - pad
-    y0, y1 = pad, ih - pad
+    # reserve an outer band between each line and the image edge for its label
+    edge = max(4, round(min(iw, ih) * 0.02))
+    left_band = min(edge + h_th + label_gap, iw // 3)      # left of the height line
+    bottom_band = min(edge + w_th + label_gap, ih // 3)    # below the width line
+    top_inset = min(edge + arrow_hw, ih // 3)
+    right_inset = min(edge + arrow_hw, iw // 3)
+    xl = left_band            # vertical (height) line x
+    yb = ih - bottom_band     # horizontal (width) line y
+    x_end = iw - right_inset
+    y_top = top_inset
 
-    # === WIDTH — horizontal line near the bottom ===
-    yb = ih - pad
-    _hline(draw, [(x0, yb), (x1, yb)], col, line_w, halo, halo_pad)
+    # === WIDTH — horizontal line, number BELOW the line ===
+    _hline(draw, [(xl, yb), (x_end, yb)], col, line_w, halo, halo_pad)
     if style.show_witness:
-        _hline(draw, [(x0, yb - cap), (x0, yb + cap)], col, line_w, halo, halo_pad)
-        _hline(draw, [(x1, yb - cap), (x1, yb + cap)], col, line_w, halo, halo_pad)
-    _arrow(draw, (x0, yb), (-1, 0), arrow_len, arrow_hw, col, halo, halo_pad)
-    _arrow(draw, (x1, yb), (1, 0), arrow_len, arrow_hw, col, halo, halo_pad)
-    cx = iw / 2
-    ty = yb - label_gap - w_th
+        _hline(draw, [(xl, yb - cap), (xl, yb + cap)], col, line_w, halo, halo_pad)
+        _hline(draw, [(x_end, yb - cap), (x_end, yb + cap)], col, line_w, halo, halo_pad)
+    _arrow(draw, (xl, yb), (-1, 0), arrow_len, arrow_hw, col, halo, halo_pad)
+    _arrow(draw, (x_end, yb), (1, 0), arrow_len, arrow_hw, col, halo, halo_pad)
+    cx = (xl + x_end) / 2
+    ty = yb + label_gap
     draw.text((cx - w_tw / 2 - wb[0], ty - wb[1]), w_text, font=font, fill=col,
               stroke_width=stroke_w, stroke_fill=halo)
 
-    # === HEIGHT — vertical line near the left ===
-    xl = pad
-    _hline(draw, [(xl, y0), (xl, y1)], col, line_w, halo, halo_pad)
+    # === HEIGHT — vertical line, number to the LEFT (outer) of the line ===
+    _hline(draw, [(xl, y_top), (xl, yb)], col, line_w, halo, halo_pad)
     if style.show_witness:
-        _hline(draw, [(xl - cap, y0), (xl + cap, y0)], col, line_w, halo, halo_pad)
-        _hline(draw, [(xl - cap, y1), (xl + cap, y1)], col, line_w, halo, halo_pad)
-    _arrow(draw, (xl, y0), (0, -1), arrow_len, arrow_hw, col, halo, halo_pad)
-    _arrow(draw, (xl, y1), (0, 1), arrow_len, arrow_hw, col, halo, halo_pad)
+        _hline(draw, [(xl - cap, y_top), (xl + cap, y_top)], col, line_w, halo, halo_pad)
+        _hline(draw, [(xl - cap, yb), (xl + cap, yb)], col, line_w, halo, halo_pad)
+    _arrow(draw, (xl, y_top), (0, -1), arrow_len, arrow_hw, col, halo, halo_pad)
+    _arrow(draw, (xl, yb), (0, 1), arrow_len, arrow_hw, col, halo, halo_pad)
 
     lbl = Image.new("RGBA", (max(1, h_tw), max(1, h_th)), (0, 0, 0, 0))
     ImageDraw.Draw(lbl).text((-hb[0], -hb[1]), h_text, font=font, fill=col,
                              stroke_width=stroke_w, stroke_fill=halo)
     lbl = lbl.rotate(90, expand=True)
     rw, rh = lbl.size
-    px = int(xl + label_gap)
-    py = int(ih / 2 - rh / 2)
+    px = int(xl - label_gap - rw)
+    py = int((y_top + yb) / 2 - rh / 2)
     px = max(0, min(iw - rw, px))
     py = max(0, min(ih - rh, py))
     canvas.alpha_composite(lbl, (px, py))
