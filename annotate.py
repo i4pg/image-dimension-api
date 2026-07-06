@@ -21,7 +21,7 @@ import io
 import os
 from dataclasses import dataclass
 
-from PIL import Image, ImageColor, ImageDraw, ImageFont
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont
 
 # Guard against decompression bombs while still allowing large product photos.
 Image.MAX_IMAGE_PIXELS = 64_000_000  # ~64 megapixels
@@ -171,14 +171,45 @@ def _load_logo():
     return _logo_cache or None
 
 
-def _apply_watermark(product, style):
-    """Composite the product over a (background + faint centered logo) backdrop.
+def _has_transparency(im):
+    if im.mode in ("RGBA", "LA"):
+        return im.convert("RGBA").getchannel("A").getextrema()[0] < 255
+    return im.mode == "P" and "transparency" in im.info
 
-    The logo shows through wherever the product image is transparent — the
-    classic catalog look for cut-out product photos.
+
+def _product_keep_mask(product, white_thresh=235):
+    """L mask: 255 = product (keep), 0 = background (let the watermark show).
+
+    Uses the alpha channel when the image is transparent; otherwise treats the
+    near-white region *connected to the border* as background — studio
+    product-on-white shots. Internal light areas (labels, caps) are NOT border
+    connected, so they stay part of the product and the logo never punches
+    through them.
     """
     iw, ih = product.size
-    canvas = Image.new("RGBA", (iw, ih), _rgba(style.watermark_bg))
+    if _has_transparency(product):
+        return product.convert("RGBA").getchannel("A")
+    gray = product.convert("L")
+    cand = gray.point(lambda v: 255 if v >= white_thresh else 0)   # white-ish
+    work = cand.copy()
+    filled = False
+    for c in [(0, 0), (iw - 1, 0), (0, ih - 1), (iw - 1, ih - 1)]:
+        if work.getpixel(c) == 255:
+            ImageDraw.floodfill(work, c, 128, thresh=0)            # border-white
+            filled = True
+    if not filled:
+        return Image.new("L", (iw, ih), 255)                       # no white bg
+    keep = work.point(lambda v: 0 if v == 128 else 255)
+    return keep.filter(ImageFilter.GaussianBlur(1.2))              # soften edge
+
+
+def _apply_watermark(product, style):
+    """Place the NAWAQIS logo BEHIND the product: a faint centered logo on the
+    background, product kept on top. Works for transparent cut-outs (via alpha)
+    and for opaque product-on-white JPEGs (via background detection).
+    """
+    iw, ih = product.size
+    wm = Image.new("RGBA", (iw, ih), _rgba(style.watermark_bg))
     logo = _load_logo()
     if logo is not None:
         scale = max(0.05, min(1.0, float(style.watermark_scale)))
@@ -192,9 +223,11 @@ def _apply_watermark(product, style):
         op = max(0.0, min(1.0, float(style.watermark_opacity)))
         if op < 1.0:
             piece.putalpha(piece.split()[-1].point(lambda v: int(v * op)))
-        canvas.alpha_composite(piece, ((iw - tw) // 2, (ih - th) // 2))
-    canvas.alpha_composite(product, (0, 0))
-    return canvas
+        wm.alpha_composite(piece, ((iw - tw) // 2, (ih - th) // 2))
+    keep = _product_keep_mask(product)
+    out = wm.copy()
+    out.paste(product.convert("RGB"), (0, 0), keep)
+    return out
 
 
 # ---------------------------------------------------------------------------

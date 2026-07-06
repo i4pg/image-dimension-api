@@ -94,7 +94,7 @@ http://localhost:8000/annotate?width=30&height=45&unit=cm&image_url=https://pics
 | `halo`        |          | `auto`    | Inset contrast outline: `auto` \| colour \| `none` |
 | `color`       |          | `#151515` | Line + label colour (name or hex)              |
 | `bg`          |          | `#FFFFFF` | Margin colour (**`margin` mode only**)         |
-| `watermark`   |          | off       | `1` places the NAWAQIS logo **behind** the image (shows through transparent areas) |
+| `watermark`   |          | off       | `1` places the NAWAQIS logo **behind** the product (on a product-on-white JPEG's background, or a PNG's transparent areas) |
 | `watermark_opacity` |    | `0.12`    | Logo opacity, 0–1                              |
 | `watermark_scale` |      | `0.72`    | Logo width as a fraction of the image          |
 | `watermark_bg` |         | `#FFFFFF` | Colour behind the product's transparent areas  |
@@ -112,11 +112,18 @@ http://localhost:8000/annotate?width=30&height=45&unit=cm&image_url=https://pics
 ## Watermark (NAWAQIS logo behind the product)
 
 Pass `watermark=1` to composite the NAWAQIS logo as a faint backdrop **behind**
-the product — the classic catalog look. It shows through wherever the product
-image is **transparent** (a cut-out PNG); on an opaque photo the product simply
-covers it. Tune with `watermark_opacity` (default `0.12`) and `watermark_scale`
-(default `0.72`). The logo ships in `assets/nawaqis-logo.png` and can be
-overridden with the `WATERMARK_LOGO` env var.
+the product — the classic catalog look. The logo lands on the background
+*around* the product, which is detected two ways:
+
+- **Product-on-white JPEG** (typical catalog shot): the near-white region
+  connected to the border is treated as background and gets the logo. Internal
+  light areas (labels, caps) are **not** border-connected, so they stay clean —
+  the logo never punches through the product.
+- **Transparent cut-out PNG**: the logo shows through the alpha.
+
+Works best on white / near-white backgrounds. Tune with `watermark_opacity`
+(default `0.12`) and `watermark_scale` (default `0.72`); the logo ships in
+`assets/nawaqis-logo.png` (override via the `WATERMARK_LOGO` env var).
 
 ```bash
 curl -X POST "http://localhost:8000/annotate?width=8&height=22&unit=cm&watermark=1" \
