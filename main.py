@@ -113,8 +113,8 @@ def _build_style(params: dict) -> tuple[float, float, DimStyle]:
             margin_extra=int(get("margin_extra", 0)),
             show_witness=str(get("witness", "1")).lower() not in ("0", "false", "no"),
             watermark=str(get("watermark", "")).lower() in ("1", "true", "yes", "on"),
-            watermark_opacity=float(get("watermark_opacity", 0.12)),
-            watermark_scale=float(get("watermark_scale", 0.72)),
+            watermark_opacity=float(get("watermark_opacity", 0.20)),
+            watermark_scale=float(get("watermark_scale", 0.9)),
             watermark_bg=get("watermark_bg", "#FFFFFF"),
         )
     except (TypeError, ValueError):

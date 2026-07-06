@@ -95,8 +95,8 @@ http://localhost:8000/annotate?width=30&height=45&unit=cm&image_url=https://pics
 | `color`       |          | `#151515` | Line + label colour (name or hex)              |
 | `bg`          |          | `#FFFFFF` | Margin colour (**`margin` mode only**)         |
 | `watermark`   |          | off       | `1` places the NAWAQIS logo **behind** the product (on a product-on-white JPEG's background, or a PNG's transparent areas) |
-| `watermark_opacity` |    | `0.12`    | Logo opacity, 0–1                              |
-| `watermark_scale` |      | `0.72`    | Logo width as a fraction of the image          |
+| `watermark_opacity` |    | `0.20`    | Logo opacity, 0–1                              |
+| `watermark_scale` |      | `0.9`     | Logo width as a fraction of the image          |
 | `watermark_bg` |         | `#FFFFFF` | Colour behind the product's transparent areas  |
 | `format`      |          | `png`     | `png` \| `jpeg` \| `webp`                      |
 | `response`    |          | `binary`  | `binary` \| `base64` \| `dataurl` (JSON out)   |
@@ -122,7 +122,7 @@ the product — the classic catalog look. The logo lands on the background
 - **Transparent cut-out PNG**: the logo shows through the alpha.
 
 Works best on white / near-white backgrounds. Tune with `watermark_opacity`
-(default `0.12`) and `watermark_scale` (default `0.72`); the logo ships in
+(default `0.20`) and `watermark_scale` (default `0.9`); the logo ships in
 `assets/nawaqis-logo.png` (override via the `WATERMARK_LOGO` env var).
 
 ```bash

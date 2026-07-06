@@ -76,8 +76,8 @@ class DimStyle:
     margin_extra: int = 0          # extra outer space (margin mode only)
     show_witness: bool = True      # end ticks / extension lines
     watermark: bool = False        # composite the NAWAQIS logo BEHIND the image
-    watermark_opacity: float = 0.12
-    watermark_scale: float = 0.72  # logo width as a fraction of the image width
+    watermark_opacity: float = 0.20
+    watermark_scale: float = 0.9   # logo width as a fraction of the image width
     watermark_bg: str = "#FFFFFF"  # fill shown where the product is transparent
 
 
