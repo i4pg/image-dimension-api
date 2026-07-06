@@ -1,0 +1,15 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# (Kept for reproducibility; the API deploy passes these same settings.)
+services:
+  - type: web
+    name: image-dimension-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: MAX_IMAGE_BYTES
+        value: "20971520"
+      - key: FETCH_TIMEOUT
+        value: "15"
