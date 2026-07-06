@@ -18,10 +18,18 @@ d.rounded_rectangle([120, 150, 500, 760], radius=60, fill="#563D96")     # body
 f = load_font(46)
 d.text((310, 455), "NAWAQIS", fill="white", font=f, anchor="mm")
 
-out = annotate(img, 18, 24, DimStyle(unit="cm", color="#151515"))
-data, media = to_bytes(out, "png")
+here = os.path.dirname(os.path.abspath(__file__))
 
-dest = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo_out.png")
-with open(dest, "wb") as fh:
+# inset (default): output keeps the SAME size as the input
+out = annotate(img, 18, 24, DimStyle(unit="cm"))
+data, _ = to_bytes(out, "png")
+with open(os.path.join(here, "demo_out.png"), "wb") as fh:
     fh.write(data)
-print(f"wrote {dest}  ({media}, {out.size[0]}x{out.size[1]})")
+print(f"inset : input {img.size[0]}x{img.size[1]} -> output {out.size[0]}x{out.size[1]}  (same size)")
+
+# margin: adds a white border (larger output)
+outm = annotate(img, 18, 24, DimStyle(unit="cm", mode="margin"))
+datam, _ = to_bytes(outm, "png")
+with open(os.path.join(here, "demo_out_margin.png"), "wb") as fh:
+    fh.write(datam)
+print(f"margin: input {img.size[0]}x{img.size[1]} -> output {outm.size[0]}x{outm.size[1]}  (expanded)")

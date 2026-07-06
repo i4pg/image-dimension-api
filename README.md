@@ -7,9 +7,12 @@ drawn on it:
 - **Width** → a horizontal dimension line along the **bottom** (arrows + label)
 - **Height** → a vertical dimension line up the **left** (arrows + label)
 
-The original image is centered inside white margins so the lines never cover
-the product. Font size, line weight, arrow size and margins all auto-scale with
-the image resolution.
+By default (**`mode=inset`**) the lines are drawn **on** the image just inside
+the edges, so the output keeps the **exact same dimensions as the input**
+(1024×1024 → 1024×1024). A contrast **halo** keeps them readable over any photo.
+Set **`mode=margin`** to instead place the dimensions in added white margins
+(larger output). Font size, line weight and arrow size auto-scale with the
+image resolution.
 
 ```
      +---------------+
@@ -87,8 +90,10 @@ http://localhost:8000/annotate?width=30&height=45&unit=cm&image_url=https://pics
 | `width`       | ✅       | —         | Number drawn on the bottom line                |
 | `height`      | ✅       | —         | Number drawn on the left line                  |
 | `unit`        |          | *(none)*  | Suffix for both labels, e.g. `cm`              |
+| `mode`        |          | `inset`   | `inset` = same output size, drawn on image · `margin` = adds a white border |
+| `halo`        |          | `auto`    | Inset contrast outline: `auto` \| colour \| `none` |
 | `color`       |          | `#151515` | Line + label colour (name or hex)              |
-| `bg`          |          | `#FFFFFF` | Margin / background colour                     |
+| `bg`          |          | `#FFFFFF` | Margin colour (**`margin` mode only**)         |
 | `format`      |          | `png`     | `png` \| `jpeg` \| `webp`                      |
 | `response`    |          | `binary`  | `binary` \| `base64` \| `dataurl` (JSON out)   |
 | `scale`       |          | `1.0`     | Multiply all derived sizes                     |

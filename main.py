@@ -103,6 +103,8 @@ def _build_style(params: dict) -> tuple[float, float, DimStyle]:
             unit=(get("unit", "") or ""),
             color=get("color", "#151515"),
             bg=get("bg", "#FFFFFF"),
+            mode=get("mode", "inset"),
+            halo=get("halo", "auto"),
             scale=float(get("scale", 1.0)),
             line_width=as_int("line_width"),
             font_size=as_int("font_size"),
@@ -160,8 +162,11 @@ def root():
         "required": ["width", "height"],
         "options": {
             "unit": "label suffix, e.g. cm (default none)",
+            "mode": "inset = same output size, drawn on the image (default) | "
+                    "margin = adds a white border around the image",
+            "halo": "inset contrast outline: auto | colour | none (default auto)",
             "color": "line/label colour, name or hex (default #151515)",
-            "bg": "margin colour (default #FFFFFF)",
+            "bg": "margin colour, margin mode only (default #FFFFFF)",
             "format": "png | jpeg | webp (default png)",
             "response": "binary | base64 | dataurl (default binary)",
             "scale": "multiply all sizes (default 1.0)",
