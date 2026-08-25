@@ -45,6 +45,32 @@ the diagonal has somewhere to go; on a full-bleed photo it will cross the
 product, and the contrast halo keeps it readable. In `margin` mode the canvas
 simply grows and the diagonal sits entirely outside the image.
 
+The depth label sits **centred above the diagonal**, kept horizontal. That is
+not cosmetic: parking it off the diagonal's tip means reserving the full label
+width on the right, which collapsed the width bracket to ~52% of the frame on a
+wide label such as `124.4 mm`. Centred above, only half the label overhangs and
+the bracket keeps ~74-82%.
+
+### Suspect depth values
+
+A depth far out of proportion to width/height still **renders** - the length rule
+clamps the ratio at 1.0, so any depth at or above the largest other dimension
+draws an identical diagonal. A wrong value therefore produces a perfectly
+plausible-looking image with an absurd number on it. `max_ratio` (default `4`)
+is the only thing that tells you:
+
+- binary responses → an `X-Dimension-Warning` header
+- `response=base64` / `dataurl` → a `"warnings"` array in the JSON
+- `strict=1` → a `400` instead, for callers that want a hard stop
+
+It never fails by default, so a bad row cannot break a batch run.
+
+```bash
+curl -si "http://localhost:8000/annotate?width=131&height=121&depth=1244&unit=mm&image_url=..." \
+  | grep -i x-dimension-warning
+# X-Dimension-Warning: depth 1244 is 9.5x the largest of width/height (131) - check the source data
+```
+
 ## Run it
 
 ```bash
@@ -112,6 +138,8 @@ http://localhost:8000/annotate?width=30&height=45&unit=cm&image_url=https://pics
 | `depth`       |          | *(none)*  | Optional third dimension, drawn as a receding diagonal from the bottom-right. **Omit it and the output is byte-identical to before.** |
 | `depth_angle` |          | `33`      | Slant of the depth diagonal, in degrees        |
 | `depth_max`   |          | `0.22`    | Longest depth diagonal, as a fraction of the short side |
+| `max_ratio`   |          | `4`       | Warn when `depth` exceeds this multiple of the larger of width/height |
+| `strict`      |          | off       | `1` returns `400` on a suspect depth instead of warning |
 | `unit`        |          | *(none)*  | Suffix for all labels, e.g. `cm`               |
 | `mode`        |          | `inset`   | `inset` = same output size, drawn on image · `margin` = adds a white border |
 | `halo`        |          | `auto`    | Inset contrast outline: `auto` \| colour \| `none` |

@@ -237,6 +237,41 @@ def _apply_watermark(product, style):
 # ---------------------------------------------------------------------------
 # Derived sizes (shared by both modes)
 # ---------------------------------------------------------------------------
+DEPTH_MAX_RATIO = 4.0      # depth beyond this multiple of w/h is called suspect
+
+
+def _depth_ratio(width_value, height_value, depth_value):
+    """Depth as a multiple of the largest stated dimension.
+
+    Single source of truth: both the drawing length and the sanity warning read
+    this, so the two can never drift apart.
+    """
+    ref = max(abs(width_value or 0), abs(height_value or 0)) or abs(depth_value) or 1.0
+    return abs(depth_value) / ref
+
+
+def depth_warning(width_value, height_value, depth_value, max_ratio=DEPTH_MAX_RATIO):
+    """Return a message when depth looks out of proportion, else None.
+
+    The drawing rule clamps the ratio at 1.0, so every depth at or above the
+    largest other dimension renders an IDENTICAL diagonal - 300 and 1244 are
+    indistinguishable in the output. A wrong value therefore produces a
+    perfectly plausible-looking image. This is the only thing that tells the
+    caller the number is nonsense.
+    """
+    if depth_value is None:
+        return None
+    try:
+        ratio = _depth_ratio(width_value, height_value, depth_value)
+    except (TypeError, ValueError):
+        return None
+    if max_ratio and ratio > float(max_ratio):
+        return (f"depth {_fmt(depth_value)} is {ratio:.1f}x the largest of "
+                f"width/height ({_fmt(max(abs(width_value or 0), abs(height_value or 0)))}) "
+                f"- check the source data")
+    return None
+
+
 def _depth_length(iw, ih, width_value, height_value, depth_value, style):
     """Visual length of the depth diagonal, in pixels.
 
@@ -248,8 +283,7 @@ def _depth_length(iw, ih, width_value, height_value, depth_value, style):
     is predictable rather than a projection that is silently wrong.
     """
     short = min(iw, ih)
-    ref = max(abs(width_value or 0), abs(height_value or 0)) or abs(depth_value) or 1.0
-    r = min(1.0, max(0.0, abs(depth_value) / ref))
+    r = min(1.0, max(0.0, _depth_ratio(width_value, height_value, depth_value)))
     lo = 0.06 * short
     hi = max(lo + 1.0, float(style.depth_max) * short)
     return lo + r * (hi - lo)
@@ -263,7 +297,7 @@ def _depth_fit(iw, ih, width_value, height_value, depth_value, style, left_band,
     length = _depth_length(iw, ih, width_value, height_value, depth_value, style)
 
     run = length * ca
-    max_run = max(arrow_len, iw // 2 - base_right - label_gap - d_tw - arrow_hw)
+    max_run = max(arrow_len, iw // 2 - base_right - arrow_hw)
     if run > max_run:
         run = max_run
         length = (run / ca) if ca > 1e-6 else length
@@ -272,18 +306,33 @@ def _depth_fit(iw, ih, width_value, height_value, depth_value, style, left_band,
     if rise > head and sa > 1e-6:
         length = max(arrow_len, head / sa)
         run = length * ca
-    band = base_right + int(round(run + label_gap + d_tw + arrow_hw))
+    band = base_right + int(round(_depth_band(run, d_tw, arrow_hw, label_gap)))
     return length, min(band, iw - left_band - arrow_len)
+
+
+def _depth_band(run, label_w, arrow_hw, label_gap):
+    """Right-hand space the depth diagonal needs, in pixels.
+
+    The label is centred ABOVE the diagonal's midpoint rather than parked off its
+    tip, so only half the label overhangs. Reserving the full label width here is
+    what used to collapse the width bracket to ~52% of the frame on a wide label
+    such as "124.4 mm".
+    """
+    return max(run + arrow_hw, run / 2.0 + label_w / 2.0 + label_gap)
 
 
 def _draw_depth(draw, origin, length, angle_deg, font, text, col, line_w,
                 arrow_len, arrow_hw, label_gap, halo=None, halo_pad=0,
-                stroke_w=0):
+                stroke_w=0, bounds=None):
     """Draw the receding depth line up-and-right from `origin`, label kept level.
 
     Only the far end gets an arrowhead. The origin is left bare on purpose: the
     width line already puts an arrow AND a witness cap on this exact vertex, and
     a third mark there turns the corner to mush.
+
+    The label sits centred ABOVE the diagonal's midpoint, horizontal. Rotating it
+    to the diagonal's angle resamples badly at label sizes, and parking it off
+    the tip forces the width line to give up its full width (see _depth_band).
     """
     ang = math.radians(angle_deg)
     dx, dy = math.cos(ang), -math.sin(ang)
@@ -291,10 +340,20 @@ def _draw_depth(draw, origin, length, angle_deg, font, text, col, line_w,
     tip = (ox + dx * length, oy + dy * length)
     _hline(draw, [origin, tip], col, line_w, halo, halo_pad)
     _arrow(draw, tip, (dx, dy), arrow_len, arrow_hw, col, halo, halo_pad)
+
     tb = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_w)
-    th = tb[3] - tb[1]
-    draw.text((tip[0] + label_gap - tb[0], tip[1] - th / 2 - tb[1]), text,
-              font=font, fill=col, stroke_width=stroke_w, stroke_fill=halo)
+    tw, th = tb[2] - tb[0], tb[3] - tb[1]
+    mx = (ox + tip[0]) / 2.0
+    lx = mx - tw / 2.0
+    # Clear the whole diagonal, not just the midpoint: the line RISES to the
+    # right, so a label sitting above the midpoint gets speared by the arrowhead.
+    ly = tip[1] - (label_gap + line_w + arrow_hw) - th
+    if bounds:                      # keep it on the canvas, as the height label does
+        bw, bh = bounds
+        lx = max(0, min(bw - tw, lx))
+        ly = max(0, min(bh - th, ly))
+    draw.text((lx - tb[0], ly - tb[1]), text, font=font, fill=col,
+              stroke_width=stroke_w, stroke_fill=halo)
     return tip
 
 
@@ -403,7 +462,7 @@ def _annotate_inset(img, width_value, height_value, style, depth_value=None):
     if d_text is not None:
         _draw_depth(draw, (x_end, yb), depth_len, style.depth_angle, font, d_text,
                     col, line_w, arrow_len, arrow_hw, label_gap, halo, halo_pad,
-                    stroke_w)
+                    stroke_w, bounds=(iw, ih))
 
     return canvas
 
@@ -448,7 +507,7 @@ def _annotate_margin(img, width_value, height_value, style, depth_value=None):
     top_margin = outer + arrow_hw
     right_margin = outer + arrow_hw
     if d_text is not None:
-        right_margin += int(round(run + label_gap + d_tw))
+        right_margin += int(round(_depth_band(run, d_tw, arrow_hw, label_gap)))
     canvas_w = left_margin + iw + right_margin
     canvas_h = top_margin + ih + bottom_margin
 
@@ -492,7 +551,8 @@ def _annotate_margin(img, width_value, height_value, style, depth_value=None):
     # === DEPTH — diagonal receding up-right from the width line's right end ===
     if d_text is not None:
         _draw_depth(draw, (img_right, y_dim), depth_len, style.depth_angle, font,
-                    d_text, col, line_w, arrow_len, arrow_hw, label_gap)
+                    d_text, col, line_w, arrow_len, arrow_hw, label_gap,
+                    bounds=(canvas_w, canvas_h))
 
     return canvas
 

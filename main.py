@@ -27,7 +27,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from annotate import DimStyle, annotate, open_image, to_bytes
+from annotate import DimStyle, annotate, open_image, to_bytes, depth_warning
 
 app = FastAPI(title="Image Dimension Annotator", version="1.0.0")
 
@@ -81,7 +81,7 @@ async def fetch_url(url: str) -> bytes:
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
-def _build_style(params: dict) -> tuple[float, float, float | None, DimStyle]:
+def _build_style(params: dict) -> tuple[float, float, float | None, DimStyle, list[str]]:
     def get(name, default=None):
         v = params.get(name)
         return v if v not in (None, "") else default
@@ -129,7 +129,21 @@ def _build_style(params: dict) -> tuple[float, float, float | None, DimStyle]:
         )
     except (TypeError, ValueError):
         raise ApiError(400, "A numeric styling parameter was not a number")
-    return width_value, height_value, depth_value, style
+
+    # A depth wildly out of proportion still RENDERS - the drawing rule clamps it
+    # and the result looks perfectly plausible - so this is the only signal the
+    # caller gets that the source data is wrong. Never fatal unless strict=1.
+    warnings = []
+    try:
+        max_ratio = float(get("max_ratio", 4.0))
+    except (TypeError, ValueError):
+        raise ApiError(400, "max_ratio must be a number")
+    warn = depth_warning(width_value, height_value, depth_value, max_ratio)
+    if warn:
+        if str(get("strict", "")).lower() in ("1", "true", "yes", "on"):
+            raise ApiError(400, warn)
+        warnings.append(warn)
+    return width_value, height_value, depth_value, style, warnings
 
 
 def _decode(image_bytes: bytes) -> Image.Image:
@@ -143,7 +157,7 @@ def _decode(image_bytes: bytes) -> Image.Image:
         raise ApiError(422, "Could not decode the image data")
 
 
-def _render(result: Image.Image, params: dict, style: DimStyle):
+def _render(result: Image.Image, params: dict, style: DimStyle, warnings=None):
     fmt = (params.get("format") or "png").lower()
     data, media = to_bytes(result, fmt=fmt, bg=style.bg)
     mode = (params.get("response") or "binary").lower()
@@ -151,9 +165,14 @@ def _render(result: Image.Image, params: dict, style: DimStyle):
         b64 = base64.b64encode(data).decode()
         if mode == "dataurl":
             b64 = f"data:{media};base64,{b64}"
-        return JSONResponse({"image": b64, "media_type": media,
-                             "width": result.size[0], "height": result.size[1]})
+        payload = {"image": b64, "media_type": media,
+                   "width": result.size[0], "height": result.size[1]}
+        if warnings:
+            payload["warnings"] = warnings
+        return JSONResponse(payload)
     headers = {}
+    if warnings:
+        headers["X-Dimension-Warning"] = "; ".join(warnings)
     if params.get("download"):
         ext = "jpg" if media == "image/jpeg" else media.split("/")[-1]
         headers["Content-Disposition"] = f'attachment; filename="annotated.{ext}"'
@@ -180,6 +199,11 @@ def root():
                      "from the bottom-right corner (omit for width/height only)",
             "depth_angle": "slant of the depth diagonal in degrees (default 33)",
             "depth_max": "longest depth diagonal as a fraction of the short side (default 0.22)",
+            "max_ratio": "warn when depth exceeds this multiple of the larger of "
+                         "width/height (default 4); the warning rides on the "
+                         "X-Dimension-Warning header, or a 'warnings' array when "
+                         "response=base64|dataurl",
+            "strict": "1 to reject an out-of-proportion depth with 400 instead of warning",
             "unit": "label suffix, e.g. cm (default none)",
             "mode": "inset = same output size, drawn on the image (default) | "
                     "margin = adds a white border around the image",
@@ -232,10 +256,10 @@ async def annotate_post(request: Request):
             raise ApiError(400, "Provide an image via multipart 'file', "
                                 "'image_url', or a raw image request body")
 
-        width_value, height_value, depth_value, style = _build_style(params)
+        width_value, height_value, depth_value, style, warnings = _build_style(params)
         src = _decode(image_bytes)
         result = annotate(src, width_value, height_value, style, depth_value)
-        return _render(result, params, style)
+        return _render(result, params, style, warnings)
 
     except ApiError as e:
         return JSONResponse({"error": e.message}, status_code=e.status)
@@ -251,11 +275,11 @@ async def annotate_get(request: Request):
         if not image_url:
             raise ApiError(400, "GET /annotate needs image_url "
                                 "(use POST to upload binary or a file)")
-        width_value, height_value, depth_value, style = _build_style(params)
+        width_value, height_value, depth_value, style, warnings = _build_style(params)
         image_bytes = await fetch_url(image_url)
         src = _decode(image_bytes)
         result = annotate(src, width_value, height_value, style, depth_value)
-        return _render(result, params, style)
+        return _render(result, params, style, warnings)
     except ApiError as e:
         return JSONResponse({"error": e.message}, status_code=e.status)
     except Exception as e:  # noqa: BLE001
