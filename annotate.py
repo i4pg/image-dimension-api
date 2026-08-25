@@ -2,7 +2,8 @@
 Core image dimension-annotation logic (Pillow only, no web framework).
 
 Given a PIL image plus a width and height value, this draws engineering-style
-dimension lines for the WIDTH (bottom) and HEIGHT (left), with arrows + labels.
+dimension lines for the WIDTH (bottom) and HEIGHT (left), with arrows + labels,
+plus an optional DEPTH diagonal receding from the bottom-right corner.
 
 Two layout modes:
   * "inset"  (default) — draws ON the image, just inside the edges. The output
@@ -18,6 +19,7 @@ and can be overridden via `DimStyle`.
 from __future__ import annotations
 
 import io
+import math
 import os
 from dataclasses import dataclass
 
@@ -75,6 +77,8 @@ class DimStyle:
     gap: int | None = None         # gap/inset between edge and dimension line
     margin_extra: int = 0          # extra outer space (margin mode only)
     show_witness: bool = True      # end ticks / extension lines
+    depth_angle: float = 33.0      # slant of the depth diagonal, degrees
+    depth_max: float = 0.22        # longest depth diagonal, fraction of the short side
     watermark: bool = False        # composite the NAWAQIS logo BEHIND the image
     watermark_opacity: float = 0.20
     watermark_scale: float = 0.9   # logo width as a fraction of the image width
@@ -233,6 +237,67 @@ def _apply_watermark(product, style):
 # ---------------------------------------------------------------------------
 # Derived sizes (shared by both modes)
 # ---------------------------------------------------------------------------
+def _depth_length(iw, ih, width_value, height_value, depth_value, style):
+    """Visual length of the depth diagonal, in pixels.
+
+    A true projection is not usable here: at real scale a 30x20 box wants a
+    diagonal two-thirds the width of the frame, which inset mode cannot fit, so
+    every plausible value ends up pinned to the same clamp. Instead the depth is
+    mapped by RATIO against the largest stated dimension into a fixed visual
+    range. Deeper items always draw longer, the line always fits, and the result
+    is predictable rather than a projection that is silently wrong.
+    """
+    short = min(iw, ih)
+    ref = max(abs(width_value or 0), abs(height_value or 0)) or abs(depth_value) or 1.0
+    r = min(1.0, max(0.0, abs(depth_value) / ref))
+    lo = 0.06 * short
+    hi = max(lo + 1.0, float(style.depth_max) * short)
+    return lo + r * (hi - lo)
+
+
+def _depth_fit(iw, ih, width_value, height_value, depth_value, style, left_band,
+               base_right, yb, edge, arrow_len, arrow_hw, label_gap, d_tw):
+    """Depth length plus the right band it needs, kept inside the frame (inset)."""
+    ang = math.radians(style.depth_angle)
+    ca, sa = math.cos(ang), math.sin(ang)
+    length = _depth_length(iw, ih, width_value, height_value, depth_value, style)
+
+    run = length * ca
+    max_run = max(arrow_len, iw // 2 - base_right - label_gap - d_tw - arrow_hw)
+    if run > max_run:
+        run = max_run
+        length = (run / ca) if ca > 1e-6 else length
+    rise = length * sa
+    head = yb - edge - arrow_hw          # vertical room above the width line
+    if rise > head and sa > 1e-6:
+        length = max(arrow_len, head / sa)
+        run = length * ca
+    band = base_right + int(round(run + label_gap + d_tw + arrow_hw))
+    return length, min(band, iw - left_band - arrow_len)
+
+
+def _draw_depth(draw, origin, length, angle_deg, font, text, col, line_w,
+                arrow_len, arrow_hw, label_gap, halo=None, halo_pad=0,
+                stroke_w=0):
+    """Draw the receding depth line up-and-right from `origin`, label kept level.
+
+    Only the far end gets an arrowhead. The origin is left bare on purpose: the
+    width line already puts an arrow AND a witness cap on this exact vertex, and
+    a third mark there turns the corner to mush.
+    """
+    ang = math.radians(angle_deg)
+    dx, dy = math.cos(ang), -math.sin(ang)
+    ox, oy = origin
+    tip = (ox + dx * length, oy + dy * length)
+    _hline(draw, [origin, tip], col, line_w, halo, halo_pad)
+    _arrow(draw, tip, (dx, dy), arrow_len, arrow_hw, col, halo, halo_pad)
+    tb = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_w)
+    th = tb[3] - tb[1]
+    draw.text((tip[0] + label_gap - tb[0], tip[1] - th / 2 - tb[1]), text,
+              font=font, fill=col, stroke_width=stroke_w, stroke_fill=halo)
+    return tip
+
+
 def _sizes(iw, ih, style):
     base = (iw + ih) / 2.0
     s = max(0.1, float(style.scale))
@@ -251,7 +316,7 @@ def _sizes(iw, ih, style):
 # ---------------------------------------------------------------------------
 # INSET mode — draw on the image, keep the exact input size
 # ---------------------------------------------------------------------------
-def _annotate_inset(img, width_value, height_value, style):
+def _annotate_inset(img, width_value, height_value, style, depth_value=None):
     iw, ih = img.size
     font_size, line_w, arrow_len, arrow_hw, pad = _sizes(iw, ih, style)
 
@@ -278,6 +343,12 @@ def _annotate_inset(img, width_value, height_value, style):
     w_tw, w_th = wb[2] - wb[0], wb[3] - wb[1]
     h_tw, h_th = hb[2] - hb[0], hb[3] - hb[1]
 
+    d_text = _label(depth_value, style.unit) if depth_value is not None else None
+    d_tw = 0
+    if d_text is not None:
+        db = draw.textbbox((0, 0), d_text, font=font, stroke_width=stroke_w)
+        d_tw = db[2] - db[0]
+
     # reserve an outer band between each line and the image edge for its label
     edge = max(4, round(min(iw, ih) * 0.02))
     left_band = min(edge + h_th + label_gap, iw // 3)      # left of the height line
@@ -286,8 +357,16 @@ def _annotate_inset(img, width_value, height_value, style):
     right_inset = min(edge + arrow_hw, iw // 3)
     xl = left_band            # vertical (height) line x
     yb = ih - bottom_band     # horizontal (width) line y
-    x_end = iw - right_inset
     y_top = top_inset
+
+    # DEPTH — widen the right band so the width line stops short and the
+    # diagonal has somewhere to go; inset mode cannot expand the canvas.
+    depth_len = 0.0
+    if d_text is not None:
+        depth_len, right_inset = _depth_fit(
+            iw, ih, width_value, height_value, depth_value, style, left_band,
+            right_inset, yb, edge, arrow_len, arrow_hw, label_gap, d_tw)
+    x_end = iw - right_inset
 
     # === WIDTH — horizontal line, number BELOW the line ===
     _hline(draw, [(xl, yb), (x_end, yb)], col, line_w, halo, halo_pad)
@@ -320,13 +399,19 @@ def _annotate_inset(img, width_value, height_value, style):
     py = max(0, min(ih - rh, py))
     canvas.alpha_composite(lbl, (px, py))
 
+    # === DEPTH — diagonal receding up-right from the bottom-right corner ===
+    if d_text is not None:
+        _draw_depth(draw, (x_end, yb), depth_len, style.depth_angle, font, d_text,
+                    col, line_w, arrow_len, arrow_hw, label_gap, halo, halo_pad,
+                    stroke_w)
+
     return canvas
 
 
 # ---------------------------------------------------------------------------
 # MARGIN mode — expand the canvas, draw the dimensions outside the image
 # ---------------------------------------------------------------------------
-def _annotate_margin(img, width_value, height_value, style):
+def _annotate_margin(img, width_value, height_value, style, depth_value=None):
     iw, ih = img.size
     font_size, line_w, arrow_len, arrow_hw, gap = _sizes(iw, ih, style)
     witness_ext = max(2, round(arrow_len * 0.3))
@@ -345,10 +430,25 @@ def _annotate_margin(img, width_value, height_value, style):
     h_tw, h_th = hb[2] - hb[0], hb[3] - hb[1]
     h_label_w = h_th
 
+    # DEPTH — the diagonal lives entirely to the RIGHT of the image here, so it
+    # never covers the product; the canvas simply grows to fit it.
+    d_text = _label(depth_value, style.unit) if depth_value is not None else None
+    depth_len = run = 0.0
+    d_tw = 0
+    if d_text is not None:
+        db = m.textbbox((0, 0), d_text, font=font)
+        d_tw = db[2] - db[0]
+        ang = math.radians(style.depth_angle)
+        depth_len = _depth_length(iw, ih, width_value, height_value,
+                                  depth_value, style)
+        run = depth_len * math.cos(ang)
+
     left_margin = gap + arrow_hw + label_gap + h_label_w + label_gap + outer
     bottom_margin = gap + arrow_hw + label_gap + w_th + label_gap + outer
     top_margin = outer + arrow_hw
     right_margin = outer + arrow_hw
+    if d_text is not None:
+        right_margin += int(round(run + label_gap + d_tw))
     canvas_w = left_margin + iw + right_margin
     canvas_h = top_margin + ih + bottom_margin
 
@@ -389,13 +489,18 @@ def _annotate_margin(img, width_value, height_value, style):
     py = max(0, min(canvas_h - rh, py))
     canvas.alpha_composite(lbl, (px, py))
 
+    # === DEPTH — diagonal receding up-right from the width line's right end ===
+    if d_text is not None:
+        _draw_depth(draw, (img_right, y_dim), depth_len, style.depth_angle, font,
+                    d_text, col, line_w, arrow_len, arrow_hw, label_gap)
+
     return canvas
 
 
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
-def annotate(image, width_value, height_value, style=None):
+def annotate(image, width_value, height_value, style=None, depth_value=None):
     """Return a new RGBA image with width/height dimension lines drawn on it.
 
     In the default "inset" mode the output has the SAME pixel dimensions as the
@@ -406,5 +511,5 @@ def annotate(image, width_value, height_value, style=None):
     if style.watermark:
         img = _apply_watermark(img, style)
     if (style.mode or "inset").lower() == "margin":
-        return _annotate_margin(img, width_value, height_value, style)
-    return _annotate_inset(img, width_value, height_value, style)
+        return _annotate_margin(img, width_value, height_value, style, depth_value)
+    return _annotate_inset(img, width_value, height_value, style, depth_value)

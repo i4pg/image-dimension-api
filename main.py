@@ -81,7 +81,7 @@ async def fetch_url(url: str) -> bytes:
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
-def _build_style(params: dict) -> tuple[float, float, DimStyle]:
+def _build_style(params: dict) -> tuple[float, float, float | None, DimStyle]:
     def get(name, default=None):
         v = params.get(name)
         return v if v not in (None, "") else default
@@ -93,6 +93,14 @@ def _build_style(params: dict) -> tuple[float, float, DimStyle]:
         height_value = float(get("height"))
     except (TypeError, ValueError):
         raise ApiError(400, "width and height must be numbers")
+
+    # depth is OPTIONAL: absent means the previous two-line output, unchanged
+    depth_value = None
+    if get("depth") is not None:
+        try:
+            depth_value = float(get("depth"))
+        except (TypeError, ValueError):
+            raise ApiError(400, "depth must be a number")
 
     def as_int(name):
         v = get(name)
@@ -112,6 +120,8 @@ def _build_style(params: dict) -> tuple[float, float, DimStyle]:
             gap=as_int("gap"),
             margin_extra=int(get("margin_extra", 0)),
             show_witness=str(get("witness", "1")).lower() not in ("0", "false", "no"),
+            depth_angle=float(get("depth_angle", 33.0)),
+            depth_max=float(get("depth_max", 0.22)),
             watermark=str(get("watermark", "")).lower() in ("1", "true", "yes", "on"),
             watermark_opacity=float(get("watermark_opacity", 0.20)),
             watermark_scale=float(get("watermark_scale", 0.9)),
@@ -119,7 +129,7 @@ def _build_style(params: dict) -> tuple[float, float, DimStyle]:
         )
     except (TypeError, ValueError):
         raise ApiError(400, "A numeric styling parameter was not a number")
-    return width_value, height_value, style
+    return width_value, height_value, depth_value, style
 
 
 def _decode(image_bytes: bytes) -> Image.Image:
@@ -157,7 +167,8 @@ def _render(result: Image.Image, params: dict, style: DimStyle):
 def root():
     return {
         "service": "Image Dimension Annotator",
-        "draws": "width along the bottom, height up the left (arrows + labels)",
+        "draws": "width along the bottom, height up the left, plus an optional "
+                 "depth diagonal receding from the bottom-right (arrows + labels)",
         "endpoints": {
             "POST /annotate": "options as query params; image via image_url, "
                               "multipart 'file', or a raw image body",
@@ -165,6 +176,10 @@ def root():
         },
         "required": ["width", "height"],
         "options": {
+            "depth": "optional third dimension, drawn as a receding diagonal "
+                     "from the bottom-right corner (omit for width/height only)",
+            "depth_angle": "slant of the depth diagonal in degrees (default 33)",
+            "depth_max": "longest depth diagonal as a fraction of the short side (default 0.22)",
             "unit": "label suffix, e.g. cm (default none)",
             "mode": "inset = same output size, drawn on the image (default) | "
                     "margin = adds a white border around the image",
@@ -173,8 +188,8 @@ def root():
             "bg": "margin colour, margin mode only (default #FFFFFF)",
             "watermark": "1 to place the NAWAQIS logo BEHIND the image "
                          "(shows through the product's transparent areas)",
-            "watermark_opacity": "0-1 logo opacity (default 0.12)",
-            "watermark_scale": "logo width as a fraction of the image (default 0.72)",
+            "watermark_opacity": "0-1 logo opacity (default 0.20)",
+            "watermark_scale": "logo width as a fraction of the image (default 0.9)",
             "watermark_bg": "colour behind transparent areas (default #FFFFFF)",
             "format": "png | jpeg | webp (default png)",
             "response": "binary | base64 | dataurl (default binary)",
@@ -183,7 +198,7 @@ def root():
             "witness": "0 to hide the extension lines",
             "download": "1 to force a file download",
         },
-        "example": "POST /annotate?width=30&height=45&unit=cm  with an image",
+        "example": "POST /annotate?width=30&height=45&depth=20&unit=cm  with an image",
     }
 
 
@@ -217,9 +232,9 @@ async def annotate_post(request: Request):
             raise ApiError(400, "Provide an image via multipart 'file', "
                                 "'image_url', or a raw image request body")
 
-        width_value, height_value, style = _build_style(params)
+        width_value, height_value, depth_value, style = _build_style(params)
         src = _decode(image_bytes)
-        result = annotate(src, width_value, height_value, style)
+        result = annotate(src, width_value, height_value, style, depth_value)
         return _render(result, params, style)
 
     except ApiError as e:
@@ -236,10 +251,10 @@ async def annotate_get(request: Request):
         if not image_url:
             raise ApiError(400, "GET /annotate needs image_url "
                                 "(use POST to upload binary or a file)")
-        width_value, height_value, style = _build_style(params)
+        width_value, height_value, depth_value, style = _build_style(params)
         image_bytes = await fetch_url(image_url)
         src = _decode(image_bytes)
-        result = annotate(src, width_value, height_value, style)
+        result = annotate(src, width_value, height_value, style, depth_value)
         return _render(result, params, style)
     except ApiError as e:
         return JSONResponse({"error": e.message}, status_code=e.status)

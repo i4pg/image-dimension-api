@@ -1,11 +1,12 @@
 # Image Dimension Annotator
 
 A small HTTP API that takes an image (URL or binary) plus a **width** and
-**height**, and returns the same image with engineering-style dimension lines
-drawn on it:
+**height** (and optionally a **depth**), and returns the same image with
+engineering-style dimension lines drawn on it:
 
 - **Width** → a horizontal dimension line along the **bottom** (arrows + label)
 - **Height** → a vertical dimension line up the **left** (arrows + label)
+- **Depth** *(optional)* → a diagonal receding from the **bottom-right corner**
 
 By default (**`mode=inset`**) the lines are drawn **on** the image just inside
 the edges, so the output keeps the **exact same dimensions as the input**
@@ -20,10 +21,29 @@ image resolution.
   ^  |               |
   |  |    IMAGE      |
  24  |               |     <- height, up the left
-  |  |               |
-  v  +---------------+
-     <----- 18 ----->      <- width, along the bottom
+  |  |               |  /
+  v  +---------------+ /  <- depth, receding diagonal (optional)
+     <----- 18 -----> 12
+                          <- width, along the bottom
 ```
+
+### How the depth line is sized
+
+Width and height are *measured from* the picture — those lines span real pixel
+extents. Depth is not in the picture at all, so the diagonal is a **notation**,
+not a projection.
+
+Drawing it at true scale is not usable: a 30×20 box wants a diagonal two-thirds
+the width of the frame, which `inset` mode cannot fit, so every plausible value
+would pin to the same clamp and a 5 cm and a 60 cm item would look identical.
+Instead the length is mapped **by ratio** against the largest stated dimension
+into a fixed visual range (`depth_max`, default 22% of the short side). Deeper
+items always draw longer, the line always fits, and the result is predictable.
+
+In `inset` mode the width line **stops short** to open up room on the right, so
+the diagonal has somewhere to go; on a full-bleed photo it will cross the
+product, and the contrast halo keeps it readable. In `margin` mode the canvas
+simply grows and the diagonal sits entirely outside the image.
 
 ## Run it
 
@@ -89,7 +109,10 @@ http://localhost:8000/annotate?width=30&height=45&unit=cm&image_url=https://pics
 |---------------|----------|-----------|------------------------------------------------|
 | `width`       | ✅       | —         | Number drawn on the bottom line                |
 | `height`      | ✅       | —         | Number drawn on the left line                  |
-| `unit`        |          | *(none)*  | Suffix for both labels, e.g. `cm`              |
+| `depth`       |          | *(none)*  | Optional third dimension, drawn as a receding diagonal from the bottom-right. **Omit it and the output is byte-identical to before.** |
+| `depth_angle` |          | `33`      | Slant of the depth diagonal, in degrees        |
+| `depth_max`   |          | `0.22`    | Longest depth diagonal, as a fraction of the short side |
+| `unit`        |          | *(none)*  | Suffix for all labels, e.g. `cm`               |
 | `mode`        |          | `inset`   | `inset` = same output size, drawn on image · `margin` = adds a white border |
 | `halo`        |          | `auto`    | Inset contrast outline: `auto` \| colour \| `none` |
 | `color`       |          | `#151515` | Line + label colour (name or hex)              |
